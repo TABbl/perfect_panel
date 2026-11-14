@@ -1,0 +1,62 @@
+services:
+  laravel-app:
+    build:
+      context: .
+      dockerfile: docker/dev/Dockerfile
+    container_name: laravel-app
+    restart: unless-stopped
+    volumes:
+      - .:/var/www
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - task-two-network
+
+  db:
+    image: postgres:15
+    container_name: laravel-postgres-db
+    environment:
+      POSTGRES_DB: ${DB_DATABASE}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "${DB_PORT}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${DB_DATABASE}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - task-two-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-gateway
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - .:/var/www
+      - ./docker/nginx/conf.d/:/etc/nginx/conf.d/
+    depends_on:
+      - laravel-app
+    networks:
+      - task-two-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: shared-redis
+    restart: unless-stopped
+    networks:
+      - task-two-network
+
+networks:
+  task-two-network:
+    driver: bridge
+
+volumes:
+  pgdata:
