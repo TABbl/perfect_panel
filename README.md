@@ -1,33 +1,35 @@
 # perfect_panel
 Задание 1
+```sql
 WITH candidate_users AS (
-SELECT id, first_name, last_name
-FROM users
-WHERE birthday <= CURDATE() - INTERVAL 7 YEAR
-AND birthday >  CURDATE() - INTERVAL 18 YEAR
+    SELECT id, first_name, last_name
+    FROM users
+    WHERE birthday <= CURDATE() - INTERVAL 7 YEAR
+      AND birthday >  CURDATE() - INTERVAL 18 YEAR
 ),
 eligible_users AS (
-SELECT ub.user_id
-FROM user_books ub
-JOIN books b ON b.id = ub.book_id
-WHERE ub.user_id IN (SELECT id FROM candidate_users)
-GROUP BY ub.user_id
-HAVING COUNT(*) = 2
-AND COUNT(DISTINCT b.author) = 1
-AND MAX(DATEDIFF(COALESCE(ub.return_date, CURDATE()), ub.get_date)) <= 14
+    SELECT ub.user_id
+    FROM user_books ub
+    JOIN books b ON b.id = ub.book_id
+    WHERE ub.user_id IN (SELECT id FROM candidate_users)
+    GROUP BY ub.user_id
+    HAVING COUNT(*) = 2
+       AND COUNT(DISTINCT b.author) = 1
+       AND MAX(DATEDIFF(COALESCE(ub.return_date, CURDATE()), ub.get_date)) <= 14
 )
 SELECT
-CONCAT_WS('; ',
-cu.id,
-CONCAT(cu.first_name, ' ', cu.last_name),
-MAX(b.author),
-GROUP_CONCAT(b.name ORDER BY ub.get_date SEPARATOR ', ')
-) AS result
+    CONCAT_WS('; ',
+        cu.id,
+        CONCAT(cu.first_name, ' ', cu.last_name),
+        MAX(b.author),
+        GROUP_CONCAT(b.name ORDER BY ub.get_date SEPARATOR ', ')
+    ) AS result
 FROM eligible_users eu
 JOIN candidate_users cu ON cu.id = eu.user_id
 JOIN user_books ub ON ub.user_id = eu.user_id
 JOIN books b ON b.id = ub.book_id
 GROUP BY cu.id, cu.first_name, cu.last_name;
+```
 
 Пояснение - сначала отсекаем всех неподходящих юзеров и только потом делаем выборку.
 
