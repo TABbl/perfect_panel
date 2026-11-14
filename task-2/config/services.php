@@ -32,4 +32,9 @@ return [
     ],
 
     'api_auth_token' => env('API_AUTH_TOKEN'),
+
+    'coinpaprika' => [
+        'url' => env('COINPAPRIKA_URL', 'https://api.coinpaprika.com/v1/tickers'),
+        'timeout' => env('COINPAPRIKA_TIMEOUT', 30),
+    ],
 ];

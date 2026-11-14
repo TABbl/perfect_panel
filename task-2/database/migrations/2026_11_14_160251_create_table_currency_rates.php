@@ -16,8 +16,10 @@ return new class extends Migration
             $table->unsignedBigInteger('currency_id')->unique();
             $table->foreign('currency_id')->references('id')->on('currencies')->onDelete('cascade');
             // XXX: The rate is calculated in USD
-            $table->decimal('rate', 36, 14)->nullable(false);
-            $table->timestamps();
+            $table->decimal('rate', 36, 18)->nullable(false);
+            $table->timestamp('last_updated')->nullable();
+            $table->timestamp('created_at')->nullable()->default(now());
+            $table->timestamp('updated_at')->nullable()->default(now());
         });
     }
 

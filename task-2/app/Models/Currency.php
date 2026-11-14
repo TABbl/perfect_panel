@@ -10,11 +10,16 @@ class Currency extends Model
 {
     protected $table = 'currencies';
     protected $fillable = [
+        'coin_id',
         'name',
         'symbol',
         'type',
+        'last_updated',
     ];
     protected $hidden = ['created_at','updated_at'];
+    protected $casts = [
+        'type' => CurrencyTypeEnum::class,
+    ];
 
     public function rate(): HasOne
     {

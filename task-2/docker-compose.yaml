@@ -3,7 +3,28 @@ services:
     build:
       context: .
       dockerfile: docker/dev/Dockerfile
+      args:
+        UID: "${D_UID:-1000}"
+        GID: "${D_GID:-1000}"
     container_name: laravel-app
+    restart: unless-stopped
+    volumes:
+      - .:/var/www
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - task-two-network
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: docker/dev/Dockerfile
+      args:
+        UID: "${D_UID:-1000}"
+        GID: "${D_GID:-1000}"
+    container_name: laravel-scheduler
+    command: ["cron", "-f"]
     restart: unless-stopped
     volumes:
       - .:/var/www

@@ -13,11 +13,14 @@ return new class extends Migration
     {
         Schema::create('currencies', function (Blueprint $table) {
             $table->id();
+            $table->string('coin_id')->unique()->nullable(false);
             $table->string('name')->nullable(false);
-            $table->string('symbol')->unique()->nullable(false);
+            $table->string('symbol')->nullable(false);
             $table->smallInteger('type')->nullable(false);
+            $table->timestamp('last_updated')->nullable();
             $table->boolean('is_active')->default(true);
-            $table->timestamps();
+            $table->timestamp('created_at')->nullable()->default(now());
+            $table->timestamp('updated_at')->nullable()->default(now());
         });
     }
 

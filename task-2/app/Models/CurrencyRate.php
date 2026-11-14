@@ -10,7 +10,8 @@ class CurrencyRate extends Model
     protected $table = 'currency_rates';
     protected $fillable = [
         'currency_id',
-        'rate'
+        'rate',
+        'last_updated',
     ];
     protected $hidden = ['created_at','updated_at'];
 
