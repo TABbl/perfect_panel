@@ -31,19 +31,19 @@ class Handler extends ExceptionHandler
         });
         $this->renderable(function (ValidationException $e, $request) {
             return $e->getResponse()
-                ?? (new ErrorResource($e->getMessage(), 422))->response();
+                ?? (new ErrorResource('Invalid token', 403))->response();
         });
         $this->renderable(function (HttpExceptionInterface $e, $request) {
             if (!$request->is('api/*')) {
                 return null;
             }
-            return (new ErrorResource($e->getMessage() ?: 'Error', $e->getStatusCode()))->response();
+            return (new ErrorResource('Invalid token', 403))->response();
         });
         $this->renderable(function (Throwable $e, $request) {
             if (!$request->is('api/*')) {
                 return null;
             }
-            return (new ErrorResource('Internal server error', 500))->response();
+            return (new ErrorResource('Invalid token', 403))->response();
         });
     }
 }

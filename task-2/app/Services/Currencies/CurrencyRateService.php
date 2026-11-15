@@ -5,17 +5,15 @@ namespace App\Services\Currencies;
 use App\Enums\CurrencyTypeEnum;
 use App\Models\Currency;
 use App\Repositories\CurrencyRepository;
-use Illuminate\Support\Collection;
+use App\Services\Currencies\DTO\ConvertDTO;
+use App\Services\Currencies\DTO\ConvertEntity;
+use App\Services\Currencies\DTO\GetRatesDTO;
+use App\Services\Currencies\DTO\GetRatesEntity;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use InvalidArgumentException;
 
 class CurrencyRateService
 {
-    // XXX: The CoinPaprika API accepts up to 3 quotes per request.
-    private const FIAT_QUOTES_CHUNK_SIZE = 3;
-
     // XXX: Internal calculation scale for bcmath operations.
     private const CALC_SCALE = 20;
 
@@ -27,47 +25,40 @@ class CurrencyRateService
 
     public function __construct(
         private CurrencyRepository $currencyRepository,
-        private CurrencyRateCache $currencyRateCache
-    ) {
-    }
+        private CurrencyRateCache $currencyRateCache,
+        private CurrencyCommission $currencyCommission,
+        private CurrenciesRatesGatewayService $currenciesRatesGateway
+    ) {}
 
     /**
      * Convert an amount from one currency to another through USD.
      * All calculations are made with bcmath. The result is rounded
      * to 0.01 for fiat currencies and to 10 decimals for crypto ones.
      */
-    public function convert(string $from, string $to, string $amount): array
+    public function convert(ConvertEntity $entity): ConvertDTO
     {
-        $currencies = $this->currencyRateCache->conversionCurrencies([$from, $to]);
-        $fromCurrency = $currencies[$from];
-        $toCurrency = $currencies[$to];
-        $rate = bcdiv($fromCurrency['rate_usd'], $toCurrency['rate_usd'], self::CALC_SCALE);
-        $rate = bcdiv($rate, $this->commissionMultiplier(), self::CALC_SCALE);
-        $result = bcmul($amount, $rate, self::CALC_SCALE);
-        return [
-            'converted_value' => $this->roundResult($result, CurrencyTypeEnum::from($toCurrency['type'])),
-            'rate' => $this->trimDecimal($rate),
-        ];
+        $currencies = $this->currencyRateCache->conversionCurrencies([
+            $entity->getCurrencyFrom(),
+            $entity->getCurrencyTo(),
+        ]);
+        $fromCurrency = $currencies[$entity->getCurrencyFrom()];
+        $toCurrency = $currencies[$entity->getCurrencyTo()];
+        $rate = $this->currencyCommission->applyToPair($fromCurrency['rate_usd'], $toCurrency['rate_usd']);
+        $result = bcmul($entity->getValue(), $rate, self::CALC_SCALE);
+
+        return new ConvertDTO(
+            $this->roundResult($result, CurrencyTypeEnum::from($toCurrency['type'])),
+            trimDecimal($rate)
+        );
     }
 
     /**
      * Get all currency rates (or only the given symbols) in USD
      * with the configured commission applied, sorted ascending by rate.
      */
-    public function rates(?array $symbols = null): array
+    public function getRates(GetRatesEntity $entity): GetRatesDTO
     {
-        return $this->currencyRateCache->rates($symbols);
-    }
-
-    private function commissionMultiplier(): string
-    {
-        $commission = (string) config('currencies.commission', 0);
-        return bcadd('1', bcdiv($commission, '100', 14), 14);
-    }
-
-    private function trimDecimal(string $value): string
-    {
-        return str_contains($value, '.') ? rtrim(rtrim($value, '0'), '.') : $value;
+        return new GetRatesDTO($this->currencyRateCache->getRates($entity->getSymbols()));
     }
 
     /**
@@ -77,21 +68,10 @@ class CurrencyRateService
     private function roundResult(string $value, CurrencyTypeEnum $type): string
     {
         if ($type === CurrencyTypeEnum::FIAT) {
-            return $this->bcRound($value, self::FIAT_RESULT_SCALE);
+            return bcRoundHalfUp($value, self::FIAT_RESULT_SCALE, self::CALC_SCALE);
         }
-        return $this->trimDecimal($this->bcRound($value, self::CRYPTO_RESULT_SCALE));
-    }
 
-    /**
-     * Round a positive bcmath number half-up to the given scale.
-     */
-    private function bcRound(string $value, int $scale): string
-    {
-        $factor = bcpow('10', (string) $scale, 0);
-        $shifted = bcmul($value, $factor, self::CALC_SCALE);
-        $rounded = bcadd($shifted, '0.5', 0);
-
-        return bcdiv($rounded, $factor, $scale);
+        return trimDecimal(bcRoundHalfUp($value, self::CRYPTO_RESULT_SCALE, self::CALC_SCALE));
     }
 
     /**
@@ -101,9 +81,7 @@ class CurrencyRateService
      */
     public function fetchNewCurrencyRates(): void
     {
-        $response = Http::baseUrl(config('services.coinpaprika.url'))
-            ->timeout((int) config('services.coinpaprika.timeout'))
-            ->get('/')->throw()->json();
+        $response = $this->currenciesRatesGateway->fetchTickers();
 
         [$cryptoCurrencies, $cryptoRates] = $this->buildCryptoRows($response);
         [$fiatCurrencies, $fiatRates] = $this->buildFiatRows();
@@ -151,6 +129,7 @@ class CurrencyRateService
                 'last_updated' => $item['last_updated'],
             ];
         }
+
         return [$currencies, $rates];
     }
 
@@ -164,12 +143,13 @@ class CurrencyRateService
         if ($fiat->isEmpty()) {
             return [[], []];
         }
-        $btcPrices = $this->fetchBtcPricesInFiat($fiat->pluck('symbol'));
+        $btcPrices = $this->currenciesRatesGateway->fetchBtcPrices($fiat->pluck('symbol')->all());
         $btcUsd = $btcPrices['USD'] ?? null;
         if ($btcUsd === null || $btcUsd <= 0) {
             Log::warning('CoinPaprika: BTC USD price is missing, fiat rates skipped', [
                 'quotes' => array_keys($btcPrices),
             ]);
+
             return [[], []];
         }
         $lastUpdated = now();
@@ -180,6 +160,7 @@ class CurrencyRateService
             $btcPrice = $btcPrices[$symbol] ?? null;
             if ($btcPrice === null || $btcPrice <= 0) {
                 Log::warning('CoinPaprika: fiat quote is missing, skipped', ['symbol' => $symbol]);
+
                 continue;
             }
             $currencies[] = [
@@ -198,25 +179,5 @@ class CurrencyRateService
         }
 
         return [$currencies, $rates];
-    }
-
-    /**
-     * Fetch the BTC price in the given fiat currencies (chunks of 3 quotes).
-     */
-    private function fetchBtcPricesInFiat(Collection $symbols): array
-    {
-        $prices = [];
-        foreach ($symbols->chunk(self::FIAT_QUOTES_CHUNK_SIZE) as $chunk) {
-            $response = Http::baseUrl(config('services.coinpaprika.url'))
-                ->timeout((int) config('services.coinpaprika.timeout'))
-                ->get('/btc-bitcoin', ['quotes' => $chunk->implode(',')])
-                ->throw()->json();
-            foreach ($response['quotes'] ?? [] as $quote => $data) {
-                if (isset($data['price'])) {
-                    $prices[$quote] = $data['price'];
-                }
-            }
-        }
-        return $prices;
     }
 }

@@ -38,7 +38,7 @@ class GetRatesRequest extends FormRequest
         if ($symbols !== null && empty($symbols)) {
             throw new ValidationException(
                 $this->validator,
-                (new ErrorResource('At least one currency symbol must be provided', 400))->response()
+                (new ErrorResource('Invalid token', 403))->response()
             );
         }
         if ($symbols !== null) {
@@ -49,7 +49,7 @@ class GetRatesRequest extends FormRequest
                 }
                 throw new ValidationException(
                     $this->validator,
-                    (new ErrorResource('Currency not found', 400))->response()
+                    (new ErrorResource('Invalid token', 403))->response()
                 );
             }
         }
@@ -60,7 +60,7 @@ class GetRatesRequest extends FormRequest
     {
         throw new ValidationException(
             $validator,
-            (new ErrorResource($validator->errors()->first(), 400))->response()
+            (new ErrorResource('Invalid token', 403))->response()
         );
     }
 }

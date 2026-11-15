@@ -16,8 +16,10 @@ class CurrencyRateCache
 
     private ?array $currentSnapshot = null;
 
-    public function __construct(private readonly CurrencyRepository $currencyRepository)
-    {
+    public function __construct(
+        private readonly CurrencyRepository $currencyRepository,
+        private readonly CurrencyCommission $currencyCommission
+    ) {
     }
 
     /**
@@ -28,7 +30,7 @@ class CurrencyRateCache
      */
     public function symbols(): array
     {
-        return $this->snapshot()['symbols'];
+        return $this->getSnapshot()['symbols'];
     }
 
     /**
@@ -36,12 +38,20 @@ class CurrencyRateCache
      *
      * @return array<string, string>
      */
-    public function rates(?array $symbols = null): array
+    public function getRates(?array $symbols = null): array
     {
-        $rates = $this->snapshot()['rates'];
-        return $symbols === null || $symbols === []
-            ? $rates
-            : array_intersect_key($rates, array_fill_keys($symbols, true));
+        $wanted = $symbols === null || $symbols === []
+            ? null
+            : array_fill_keys($symbols, true);
+        $rates = [];
+        foreach ($this->getSnapshot()['currencies_with_commission'] as $currency) {
+            if ($wanted !== null && !isset($wanted[$currency['symbol']])) {
+                continue;
+            }
+            $rates[$currency['symbol']] = $currency['rate'];
+        }
+        uasort($rates, fn (string $a, string $b): int => bccomp($a, $b, self::CALC_SCALE));
+        return $rates;
     }
 
     /**
@@ -52,7 +62,7 @@ class CurrencyRateCache
     {
         $wanted = array_fill_keys($symbols, true);
         $selected = [];
-        foreach ($this->snapshot()['currencies'] as $currency) {
+        foreach ($this->getSnapshot()['currencies'] as $currency) {
             $symbol = $currency['symbol'];
             if (!isset($wanted[$symbol])) {
                 continue;
@@ -69,37 +79,50 @@ class CurrencyRateCache
      */
     public function refresh(): void
     {
-        $snapshot = $this->buildSnapshot();
-        $this->currentSnapshot = $snapshot;
-        try {
-            Cache::store('redis')->put(self::KEY, $snapshot, self::TTL_SECONDS);
-        } catch (Throwable $e) {
-            Log::warning('Currency cache refresh failed', ['error' => $e->getMessage()]);
-        }
+        $this->currentSnapshot = $this->buildSnapshot();
+        $this->storeSnapshot($this->currentSnapshot);
     }
 
-    private function snapshot(): array
+    private function getSnapshot(): array
     {
-        if ($this->currentSnapshot !== null) {
-            return $this->currentSnapshot;
+        return $this->currentSnapshot ??= $this->loadSnapshot();
+    }
+
+    private function loadSnapshot(): array
+    {
+        $snapshot = $this->readFromCache();
+        if ($snapshot !== null) {
+            return $snapshot;
         }
+        $snapshot = $this->buildSnapshot();
+        $this->storeSnapshot($snapshot);
+        return $snapshot;
+    }
+
+    private function readFromCache(): ?array
+    {
         try {
             $snapshot = Cache::store('redis')->get(self::KEY);
         } catch (Throwable $e) {
             Log::warning('Currency cache read failed', ['error' => $e->getMessage()]);
-            return $this->currentSnapshot = $this->buildSnapshot();
+            return null;
         }
-        if (is_array($snapshot) && isset($snapshot['currencies'], $snapshot['symbols'], $snapshot['rates'])) {
-            return $this->currentSnapshot = $snapshot;
-        }
-        $snapshot = $this->buildSnapshot();
-        $this->currentSnapshot = $snapshot;
+        return $this->isSnapshot($snapshot) ? $snapshot : null;
+    }
+
+    private function storeSnapshot(array $snapshot): void
+    {
         try {
             Cache::store('redis')->put(self::KEY, $snapshot, self::TTL_SECONDS);
         } catch (Throwable $e) {
-            Log::warning('Currency cache fill failed', ['error' => $e->getMessage()]);
+            Log::warning('Currency cache write failed', ['error' => $e->getMessage()]);
         }
-        return $snapshot;
+    }
+
+    private function isSnapshot(mixed $snapshot): bool
+    {
+        return is_array($snapshot)
+            && isset($snapshot['currencies'], $snapshot['symbols'], $snapshot['currencies_with_commission']);
     }
 
     private function buildSnapshot(): array
@@ -116,21 +139,25 @@ class CurrencyRateCache
             ])
             ->values()
             ->all();
-        $commission = (string) config('currencies.commission', 0);
-        $multiplier = bcadd('1', bcdiv($commission, '100', 14), 14);
-        $rates = [];
-        foreach ($currencies as $currency) {
-            $rate = bcmul($currency['rate_usd'], $multiplier, self::CALC_SCALE);
-            $rate = rtrim(rtrim($rate, '0'), '.');
-            if (!isset($rates[$currency['symbol']]) || bccomp($rate, $rates[$currency['symbol']], self::CALC_SCALE) > 0) {
-                $rates[$currency['symbol']] = $rate;
-            }
-        }
-        uasort($rates, fn (string $a, string $b): int => bccomp($a, $b, self::CALC_SCALE));
         return [
             'currencies' => $currencies,
             'symbols' => array_values(array_unique(array_column($currencies, 'symbol'))),
-            'rates' => $rates,
+            'currencies_with_commission' => $this->buildCurrenciesWithCommission($currencies),
         ];
+    }
+
+    private function buildCurrenciesWithCommission(array $currencies): array
+    {
+        $commissionedRates = $this->currencyCommission->applyToRates(
+            array_column($currencies, 'rate_usd')
+        );
+        $result = [];
+        foreach ($currencies as $index => $currency) {
+            $result[$currency['coin_id']] = [
+                ...$currency,
+                'rate' => trimDecimal($commissionedRates[$index]),
+            ];
+        }
+        return $result;
     }
 }

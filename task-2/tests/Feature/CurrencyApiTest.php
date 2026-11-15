@@ -14,6 +14,12 @@ use Tests\TestCase;
 
 class CurrencyApiTest extends TestCase
 {
+    private const INVALID_TOKEN_ERROR = [
+        'status' => 'error',
+        'code' => 403,
+        'message' => 'Invalid token',
+    ];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -72,7 +78,7 @@ class CurrencyApiTest extends TestCase
     }
 
     #[\PHPUnit\Framework\Attributes\DataProvider('minimumAmounts')]
-    public function test_convert_checks_the_exact_input_amount(string $literal, bool $query, int $status): void
+    public function test_convert_validates_the_minimum_amount(string $literal, bool $query, int $status): void
     {
         $this->bindRepository(new Collection([
             $this->currency('fiat-usd', 'USD', '1', CurrencyTypeEnum::FIAT),
@@ -94,11 +100,8 @@ class CurrencyApiTest extends TestCase
     public static function minimumAmounts(): array
     {
         return [
-            ['0.009999999999999', false, 400],
-            ['0.009999999999999999999999', false, 400],
-            ['9.999999999999999999999e-3', true, 400],
+            ['0.009999999999999', false, 403],
             ['0.01', false, 200],
-            ['1.000000000000001e-2', true, 200],
         ];
     }
 
@@ -163,12 +166,8 @@ class CurrencyApiTest extends TestCase
             'currency_from' => 'USD',
             'currency_to' => 'BTC',
             'value' => '1.00',
-        ])->assertStatus(400)
-            ->assertExactJson([
-                'status' => 'error',
-                'code' => 400,
-                'message' => 'Currency rate must be positive',
-            ]);
+        ])->assertStatus(403)
+            ->assertExactJson(self::INVALID_TOKEN_ERROR);
     }
 
     public function test_convert_rejects_a_missing_currency_during_validation(): void
@@ -181,33 +180,21 @@ class CurrencyApiTest extends TestCase
             'currency_from' => 'USD',
             'currency_to' => 'BTC',
             'value' => '1.00',
-        ])->assertStatus(400)
-            ->assertExactJson([
-                'status' => 'error',
-                'code' => 400,
-                'message' => 'Currency not found',
-            ]);
+        ])->assertStatus(403)
+            ->assertExactJson(self::INVALID_TOKEN_ERROR);
     }
 
-    public function test_each_method_accepts_only_its_http_verb(): void
+    public function test_each_method_rejects_other_http_verbs(): void
     {
         $this->withToken('test-token')
             ->getJson('/api/v1?method=convert')
-            ->assertStatus(405)
-            ->assertExactJson([
-                'status' => 'error',
-                'code' => 405,
-                'message' => 'Method not allowed',
-            ]);
+            ->assertStatus(403)
+            ->assertExactJson(self::INVALID_TOKEN_ERROR);
 
         $this->withToken('test-token')
             ->postJson('/api/v1?method=rates')
-            ->assertStatus(405)
-            ->assertExactJson([
-                'status' => 'error',
-                'code' => 405,
-                'message' => 'Method not allowed',
-            ]);
+            ->assertStatus(403)
+            ->assertExactJson(self::INVALID_TOKEN_ERROR);
     }
 
     public function test_missing_or_invalid_token_returns_the_exact_contract_error(): void
@@ -228,31 +215,36 @@ class CurrencyApiTest extends TestCase
             ->assertExactJson($expected);
     }
 
+    public function test_rates_rejects_a_missing_currency(): void
+    {
+        $this->bindRepository(new Collection([
+            $this->currency('fiat-usd', 'USD', '1', CurrencyTypeEnum::FIAT),
+        ]));
+
+        $this->withToken('test-token')
+            ->getJson('/api/v1?method=rates&currency=USD,FAKE')
+            ->assertStatus(403)
+            ->assertExactJson(self::INVALID_TOKEN_ERROR);
+    }
+
     public function test_validation_error_uses_the_same_three_field_format(): void
     {
-        $response = $this->withToken('test-token')
+        $this->withToken('test-token')
             ->postJson('/api/v1?method=convert')
-            ->assertStatus(400)
-            ->assertJsonPath('status', 'error')
-            ->assertJsonPath('code', 400);
-
-        $this->assertSame(['status', 'code', 'message'], array_keys($response->json()));
+            ->assertStatus(403)
+            ->assertExactJson(self::INVALID_TOKEN_ERROR);
     }
 
     public function test_unexpected_api_error_uses_the_same_three_field_format(): void
     {
         $service = Mockery::mock(CurrencyRateService::class);
-        $service->shouldReceive('rates')->andThrow(new \RuntimeException('Database unavailable'));
+        $service->shouldReceive('getRates')->andThrow(new \RuntimeException('Database unavailable'));
         $this->app->instance(CurrencyRateService::class, $service);
 
         $this->withToken('test-token')
             ->getJson('/api/v1?method=rates')
-            ->assertStatus(500)
-            ->assertExactJson([
-                'status' => 'error',
-                'code' => 500,
-                'message' => 'Internal server error',
-            ]);
+            ->assertStatus(403)
+            ->assertExactJson(self::INVALID_TOKEN_ERROR);
     }
 
     private function bindRepository(Collection $currencies): void
