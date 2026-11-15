@@ -42,9 +42,15 @@ GROUP BY cu.id, cu.first_name, cu.last_name;
 limit; 2) уточнить в бизнес логике, что делать если курс валюты не обновлялся n минут?
 
 
-Получить все курсы - curl -i -G "http://localhost:80/api/v1"   -H "Authorization: Bearer Xk7pQ2mZ9vLr4Bw_T1nH8yJc-R5sD3fG6aE0hN9iU7oP2qW-K4Xk7pQ2mZ9vLr4Bw_T1nH8yJc-R5sD3fG6aE0hN9iU7oP2qW-K4tV8bC1xM5zY6j_
+Получить все курсы - 
+```
+curl -i -G "http://localhost:80/api/v1" -H "Authorization: Bearer Xk7pQ2mZ9vLr4Bw_T1nH8yJc-R5sD3fG6aE0hN9iU7oP2qW-K4Xk7pQ2mZ9vLr4Bw_T1nH8yJc-R5sD3fG6aE0hN9iU7oP2qW-K4tV8bC1xM5zY6j_
+```
 
-Обменять 1000 USD в BTC - curl -i -X POST "http://localhost/api/v1?method=convert&currency_from=USD&currency_to=BTC&value=1000" \
+Обменять 1000 USD в BTC - 
+```
+curl -i -X POST "http://localhost/api/v1?method=convert&currency_from=USD&currency_to=BTC&value=1000" \
 -H "Authorization: Bearer Xk7pQ2mZ9vLr4Bw_T1nH8yJc-R5sD3fG6aE0hN9iU7oP2qW-K4tV8bC1xM5zY6j_"
+```
 
 UPD: Дополнительно потратил полтора часа чтобы привести код в более структурированный вид (хоть и заложенные мной 9 часов вышли, но я не мог оставить его в таком виде)
